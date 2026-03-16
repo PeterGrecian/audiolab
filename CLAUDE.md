@@ -55,6 +55,22 @@ Name: `sc016`. On the Pi — not yet characterised.
 Jacks: 4 output (green/black/orange/grey) + line-in (blue) + headphone + S/PDIF. No mic jack.
 Channel numbering above is typical for this class of device — verify with probe script before use.
 
+## Application context
+
+Primary use case: characterise and EQ a 15" bass/mid driver in a 5×4×3m room
+for classical music at <90 dB SPL. Room is modal below ~163 Hz (Schroeder).
+Strong room modes at 34, 43, 57 Hz. Triple axial coincidence at 171.5 Hz (c/2).
+Speaker is corner-placed, sealed enclosure (too large), plan to port at Fb≈50Hz,
+crossover at ~200 Hz.
+
+Measurement workflow:
+1. Impedance jig → driver T/S parameters, port tuning verification
+2. Garden free-field sweep (mic at 1m) → driver + box response
+3. In-room sweep (mic at listening position) → driver + box + room
+4. Difference → room transfer function → DSP correction filter
+
+See `docs/acoustic_workflow.md` for full detail.
+
 ## Architecture
 
 Three UI layers, built in order:
@@ -66,6 +82,14 @@ Three UI layers, built in order:
 
 Uses `sounddevice` which abstracts over ALSA / PulseAudio / PipeWire.
 PipeWire config is handled separately — start simple, add config only when needed.
+
+### ALSA note — multi-channel output
+
+ALSA hw devices require a full N-channel output buffer. Sending a 2-channel
+signal with output_mapping to non-default channels (e.g. [3,4] orange) is
+silently ignored — signal lands on channels 1,2 instead. Fix: always build
+an N-channel buffer and place signal in the correct column indices. This is
+implemented in the balance command.
 
 ### CM106 ALSA mixer setup (laptop)
 

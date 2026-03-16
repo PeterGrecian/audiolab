@@ -123,11 +123,71 @@ Stepped sine tones with per-octave slope and best-fit filter order.
 CM106 result: ~4 dB/oct (order ~0.7) — sub-first-order, consistent with
 combined analog coupling capacitor and digital DC-blocking high-pass.
 
+## Findings — turquoise CM106
+
+- **Bandwidth**: −3 dB at ~85 Hz (low) and ~17 kHz (high)
+- **Low-end rolloff**: ~4 dB/octave, order ~0.7 — sub-first-order, consistent
+  with combined analog coupling cap and digital DC-blocking HP filter.
+  Same rolloff on all three output jacks — confirms digital origin.
+- **Input asymmetry**: line-in R reads 0.5–2.4 dB lower than L, frequency-
+  dependent. Confirmed not the cable (verified across three output jacks and
+  two cables). Calibration correction required before L/R comparison measurements.
+- **Channel isolation**: >113 dBFS — true crosstalk is below the noise floor.
+- **Orange output (ch 3,4)**: works but requires full 8-channel output buffer.
+  ALSA silently ignores output_mapping for partial channel counts.
+- **Orange output balance**: matches green and black within 0.1 dB — all three
+  outputs are consistent.
+
+## Datasets
+
+| File | Device | Output | Cable | Notes |
+|------|--------|--------|-------|-------|
+| `balance_turquoise_20260316_110658.csv` | turquoise | green ch1,2 | long | First run — broadband RMS crosstalk (unreliable), balance valid |
+| `balance_turquoise_rear_20260316_112832.csv` | turquoise | black ch5,6 | long | FFT crosstalk |
+| `balance_short_orange_20260316_121241.csv` | turquoise | orange ch3,4 | short | **No signal** — ALSA channel bug, discard |
+| `balance_short_green_20260316_123219.csv` | turquoise | green ch1,2 | short | Confirms cable not responsible for imbalance |
+| `balance_turquoise_orange_20260316_131439.csv` | turquoise | orange ch3,4 | short | **No signal** — same bug, discard |
+| `balance_turquoise_orange_20260316_132606.csv` | turquoise | orange ch3,4 | short | **Good** — full channel buffer fix applied |
+
 ## Planned
 
-- Impedance measurement (10 Ω sense resistor, two line-in channels, external amp)
-- Frequency response plots as printable stickers (matplotlib, fixed dimensions)
-- Preamp calibrated gain/SPL dial (SVG, scalable for printing)
+### Next: impedance measurement jig
+
+Hardware: 10 Ω wirewound sense resistor (1%), external amp, power resistor load.
+
+```
+Amp → [10Ω sense] ──┬── DUT ── GND
+                    │
+               line-in L (V_ref)   line-in R (V_sense)
+
+Z(f) = 10 × (V_ref / V_sense − 1)
+```
+
+Amp calibrated first (H_amp(f) stored). Then V_drive(f) is known, freeing both
+line-in channels for simultaneous dual-speaker measurement.
+
+### Acoustic measurement (mic)
+
+Uncalibrated mic is sufficient for relative (garden vs room) measurements.
+Mic response cancels in the difference. Connects to CM106 mic-in or line-in.
+
+```
+Garden  → free-field SPL(f)  = driver + box
+Room    → in-room SPL(f)     = driver + box + room
+Difference                   = room transfer function → DSP correction
+```
+
+See `docs/acoustic_workflow.md` for full workflow including room mode analysis.
+
+### Outputs (printable)
+
+- Power amp sticker: gain/frequency plot (matplotlib, fixed label dimensions)
+- Preamp dial: calibrated gain/SPL scale (SVG, input speaker sensitivity)
+
+### Further
+
+- `calibrate` command — derive L/R input correction curve from balance CSV data
+- S/PDIF loopback characterisation (Toslink cable on order)
+- Sweex SC016 characterisation (on Raspberry Pi)
 - Live curses monitor improvements
 - Browser UI (FastAPI + WebSocket, dark-mode iOS style)
-- S/PDIF loopback characterisation
