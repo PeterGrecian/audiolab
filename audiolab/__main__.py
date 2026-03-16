@@ -215,22 +215,26 @@ def cmd_balance(args):
     sr = 48000
     duration = args.duration
     device_name = args.name
+    out_ch = args.out_channels
     amplitudes_dbfs = [-6, -12, -18, -24]
     freqs = balance_freqs()
     modes = [('L_only', [1, 0]), ('R_only', [0, 1]), ('both', [1, 1])]
 
     total = len(freqs) * len(amplitudes_dbfs) * len(modes)
     eta_s = total * duration
-    print(f"Device : {device_name}")
+    print(f"Device   : {device_name}")
+    print(f"Out ch   : {out_ch}")
     print(f"Points : {len(freqs)} frequencies × {len(amplitudes_dbfs)} amplitudes × {len(modes)} modes = {total} tones")
     print(f"Est.   : {eta_s/60:.1f} min  ({duration}s per tone)")
     print(f"Output : {args.output}\n")
 
     # Write CSV header immediately so file exists even if interrupted
     fieldnames = [
-        'timestamp', 'device', 'mode', 'frequency_hz', 'amplitude_dbfs',
+        'timestamp', 'device', 'out_channels', 'mode', 'frequency_hz', 'amplitude_dbfs',
         'L_rms_dbfs', 'R_rms_dbfs', 'L_peak_dbfs', 'R_peak_dbfs',
-        'L_crest', 'R_crest', 'balance_db', 'L_thd_pct', 'R_thd_pct',
+        'L_crest', 'R_crest', 'balance_db',
+        'L_thd_pct', 'R_thd_pct',
+        'L_xtalk_dbfs', 'R_xtalk_dbfs',
     ]
     with open(args.output, 'w', newline='') as f:
         csv.DictWriter(f, fieldnames=fieldnames).writeheader()
@@ -246,13 +250,10 @@ def cmd_balance(args):
                 trim = int(0.1 * len(sig))
 
                 for mode_name, lr in modes:
-                    stereo = np.column_stack([
-                        sig * lr[0],
-                        sig * lr[1],
-                    ])
+                    stereo = np.column_stack([sig * lr[0], sig * lr[1]])
                     rec = sd.playrec(stereo, samplerate=sr,
                                      input_mapping=[1, 2],
-                                     output_mapping=[1, 2],
+                                     output_mapping=out_ch,
                                      device=(in_id, out_id),
                                      dtype='float32')
                     sd.wait()
@@ -264,9 +265,31 @@ def cmd_balance(args):
                     thdR = thd(rec_t[:, 1:2], freq, samplerate=sr)
                     balance = sL['dBFS_rms'] - sR['dBFS_rms']
 
+                    # FFT-based crosstalk: level at driven frequency in the silent channel
+                    def fft_bin_db(ch_data, f):
+                        n = len(ch_data)
+                        win = np.hanning(n)
+                        spec = np.abs(np.fft.rfft(ch_data * win)) / (n / 2)
+                        bin_hz = sr / n
+                        idx = int(round(f / bin_hz))
+                        lo, hi = max(0, idx - 2), min(len(spec), idx + 3)
+                        rms = np.sqrt(np.mean(spec[lo:hi] ** 2))
+                        return 20 * np.log10(max(rms, 1e-10))
+
+                    # Crosstalk: FFT level in the channel that should be silent
+                    if mode_name == 'L_only':
+                        xtalk_L = None
+                        xtalk_R = fft_bin_db(rec_t[:, 1], freq)
+                    elif mode_name == 'R_only':
+                        xtalk_L = fft_bin_db(rec_t[:, 0], freq)
+                        xtalk_R = None
+                    else:
+                        xtalk_L = xtalk_R = None
+
                     writer.writerow({
                         'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
                         'device': device_name,
+                        'out_channels': f"{out_ch[0]},{out_ch[1]}",
                         'mode': mode_name,
                         'frequency_hz': round(freq, 2),
                         'amplitude_dbfs': amp_dbfs,
@@ -279,18 +302,23 @@ def cmd_balance(args):
                         'balance_db': round(balance, 3),
                         'L_thd_pct': round(thdL, 3),
                         'R_thd_pct': round(thdR, 3),
+                        'L_xtalk_dbfs': round(xtalk_L, 2) if xtalk_L is not None else '',
+                        'R_xtalk_dbfs': round(xtalk_R, 2) if xtalk_R is not None else '',
                     })
                     csvfile.flush()
 
                     done += 1
-                    pct = done / total * 100
-                    elapsed_est = done * duration
                     remain_est = (total - done) * duration
-                    print(f"  [{done:>3}/{total}  {pct:4.0f}%  ~{remain_est/60:.1f}min left]"
+                    xt_str = ''
+                    if mode_name == 'L_only' and xtalk_R is not None:
+                        xt_str = f"  xtR={xtalk_R:.1f}"
+                    elif mode_name == 'R_only' and xtalk_L is not None:
+                        xt_str = f"  xtL={xtalk_L:.1f}"
+                    print(f"  [{done:>3}/{total}  {done/total*100:3.0f}%  ~{remain_est/60:.1f}min]"
                           f"  {mode_name:<8}  {freq:>7.1f}Hz  {amp_dbfs:>4}dBFS"
                           f"  L={sL['dBFS_rms']:>6.1f}  R={sR['dBFS_rms']:>6.1f}"
                           f"  bal={balance:>+5.2f}dB"
-                          f"  THDL={thdL:.2f}%  THDR={thdR:.2f}%")
+                          f"  THD={thdL:.2f}%/{thdR:.2f}%{xt_str}")
 
     print(f"\nDone. {done} measurements written to {args.output}")
 
@@ -322,6 +350,8 @@ def main():
     p_bal = sub.add_parser("balance", help="Stereo channel balance and crosstalk test")
     p_bal.add_argument("--name", default="turquoise", help="Device name tag in CSV (default: turquoise)")
     p_bal.add_argument("--duration", type=float, default=2.0, help="Duration per tone seconds (default 2)")
+    p_bal.add_argument("--out-channels", type=int, nargs=2, default=[1, 2], metavar=("L", "R"),
+                       help="Output channel numbers (default: 1 2 front, use 5 6 for rear)")
     p_bal.add_argument("--output", default=None, help="CSV output filename (default: balance_<name>_<timestamp>.csv)")
 
     sub.add_parser("monitor", help="Live curses oscilloscope + FFT")
