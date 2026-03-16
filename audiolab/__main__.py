@@ -200,6 +200,101 @@ def cmd_rolloff(args):
         print(f"  1st order = 6 dB/oct, 2nd order = 12 dB/oct")
 
 
+def cmd_balance(args):
+    """Stereo channel balance and crosstalk test — outputs CSV."""
+    import csv
+    import datetime
+    import numpy as np
+    import sounddevice as sd
+    from audiolab.devices import find_cm106
+    from audiolab.generator import sine
+    from audiolab.capture import stats
+    from audiolab.analysis import thd, balance_freqs
+
+    in_id, out_id = find_cm106()
+    sr = 48000
+    duration = args.duration
+    device_name = args.name
+    amplitudes_dbfs = [-6, -12, -18, -24]
+    freqs = balance_freqs()
+    modes = [('L_only', [1, 0]), ('R_only', [0, 1]), ('both', [1, 1])]
+
+    total = len(freqs) * len(amplitudes_dbfs) * len(modes)
+    eta_s = total * duration
+    print(f"Device : {device_name}")
+    print(f"Points : {len(freqs)} frequencies × {len(amplitudes_dbfs)} amplitudes × {len(modes)} modes = {total} tones")
+    print(f"Est.   : {eta_s/60:.1f} min  ({duration}s per tone)")
+    print(f"Output : {args.output}\n")
+
+    # Write CSV header immediately so file exists even if interrupted
+    fieldnames = [
+        'timestamp', 'device', 'mode', 'frequency_hz', 'amplitude_dbfs',
+        'L_rms_dbfs', 'R_rms_dbfs', 'L_peak_dbfs', 'R_peak_dbfs',
+        'L_crest', 'R_crest', 'balance_db', 'L_thd_pct', 'R_thd_pct',
+    ]
+    with open(args.output, 'w', newline='') as f:
+        csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+
+    done = 0
+    with open(args.output, 'a', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        for amp_dbfs in amplitudes_dbfs:
+            amplitude = 10 ** (amp_dbfs / 20)
+            for freq in freqs:
+                sig = sine(freq=freq, duration=duration, amplitude=amplitude, samplerate=sr)
+                trim = int(0.1 * len(sig))
+
+                for mode_name, lr in modes:
+                    stereo = np.column_stack([
+                        sig * lr[0],
+                        sig * lr[1],
+                    ])
+                    rec = sd.playrec(stereo, samplerate=sr,
+                                     input_mapping=[1, 2],
+                                     output_mapping=[1, 2],
+                                     device=(in_id, out_id),
+                                     dtype='float32')
+                    sd.wait()
+
+                    rec_t = rec[trim:-trim]
+                    sL = stats(rec_t[:, 0:1])
+                    sR = stats(rec_t[:, 1:2])
+                    thdL = thd(rec_t[:, 0:1], freq, samplerate=sr)
+                    thdR = thd(rec_t[:, 1:2], freq, samplerate=sr)
+                    balance = sL['dBFS_rms'] - sR['dBFS_rms']
+
+                    writer.writerow({
+                        'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
+                        'device': device_name,
+                        'mode': mode_name,
+                        'frequency_hz': round(freq, 2),
+                        'amplitude_dbfs': amp_dbfs,
+                        'L_rms_dbfs': round(sL['dBFS_rms'], 2),
+                        'R_rms_dbfs': round(sR['dBFS_rms'], 2),
+                        'L_peak_dbfs': round(sL['dBFS_peak'], 2),
+                        'R_peak_dbfs': round(sR['dBFS_peak'], 2),
+                        'L_crest': round(sL['crest_factor'], 3),
+                        'R_crest': round(sR['crest_factor'], 3),
+                        'balance_db': round(balance, 3),
+                        'L_thd_pct': round(thdL, 3),
+                        'R_thd_pct': round(thdR, 3),
+                    })
+                    csvfile.flush()
+
+                    done += 1
+                    pct = done / total * 100
+                    elapsed_est = done * duration
+                    remain_est = (total - done) * duration
+                    print(f"  [{done:>3}/{total}  {pct:4.0f}%  ~{remain_est/60:.1f}min left]"
+                          f"  {mode_name:<8}  {freq:>7.1f}Hz  {amp_dbfs:>4}dBFS"
+                          f"  L={sL['dBFS_rms']:>6.1f}  R={sR['dBFS_rms']:>6.1f}"
+                          f"  bal={balance:>+5.2f}dB"
+                          f"  THDL={thdL:.2f}%  THDR={thdR:.2f}%")
+
+    print(f"\nDone. {done} measurements written to {args.output}")
+
+
 def cmd_monitor(args):
     """Curses live oscilloscope + FFT."""
     from audiolab.curses_ui import run
@@ -224,6 +319,11 @@ def main():
     p_roll = sub.add_parser("rolloff", help="Measure low-end rolloff order via stepped sines")
     p_roll.add_argument("--duration", type=float, default=2.0, help="Duration per tone seconds (default 2)")
 
+    p_bal = sub.add_parser("balance", help="Stereo channel balance and crosstalk test")
+    p_bal.add_argument("--name", default="turquoise", help="Device name tag in CSV (default: turquoise)")
+    p_bal.add_argument("--duration", type=float, default=2.0, help="Duration per tone seconds (default 2)")
+    p_bal.add_argument("--output", default=None, help="CSV output filename (default: balance_<name>_<timestamp>.csv)")
+
     sub.add_parser("monitor", help="Live curses oscilloscope + FFT")
 
     args = parser.parse_args()
@@ -236,6 +336,11 @@ def main():
         cmd_response(args)
     elif args.command == "rolloff":
         cmd_rolloff(args)
+    elif args.command == "balance":
+        if args.output is None:
+            import datetime
+            args.output = f"balance_{args.name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        cmd_balance(args)
     elif args.command == "monitor":
         cmd_monitor(args)
     else:
