@@ -3,14 +3,57 @@
 Audio analysis tool using CM106 USB audio devices.
 Cross-platform: works on Raspberry Pi or laptop.
 
-## Hardware
+## Devices
 
-- CM106 USB audio codec — full duplex (simultaneous playback + capture)
-- Two units available: one on a Pi, one on the laptop
-- On this laptop the CM106 enumerates as **`ICUSBAUDIO7D: USB Audio`** (ALSA device 4)
-- Connections:
-  - **Analog loopback**: front out (green) → line in (blue), null cable
-  - **Digital loopback**: S/PDIF out → S/PDIF in, coaxial RCA or TOSLINK (not yet tested)
+### turquoise — CM106 (laptop)
+
+Name: `turquoise`. ALSA enumerates as `ICUSBAUDIO7D: USB Audio` (device 4).
+
+| Ch | Signal | Jack | Colour |
+|----|--------|------|--------|
+| 1 | Front L | Output | Green (tip) |
+| 2 | Front R | Output | Green (ring) |
+| 3 | Centre | Output | Orange (tip) |
+| 4 | LFE/Sub | Output | Orange (ring) |
+| 5 | Rear L | Output | Black (tip) |
+| 6 | Rear R | Output | Black (ring) |
+| 7 | Side L | — | no jack |
+| 8 | Side R | — | no jack |
+| 1 | Line-in L | Input | Blue (tip) |
+| 2 | Line-in R | Input | Blue (ring) |
+| — | Mic | Input | Pink (mono) |
+
+Jacks: 3 output (green/orange/black) + line-in (blue) + mic (pink) + S/PDIF.
+Supported sample rates: 44100, 48000 Hz.
+
+Known issues:
+- Line-in R reads 0.5–2.4 dB lower than L (frequency-dependent, confirmed not cable)
+- Orange jack channels 3,4 work but were not detected by earlier balance test (re-test needed)
+
+Connections:
+- **Analog loopback**: front out (green) → line in (blue), null cable
+- **Digital loopback**: S/PDIF out → S/PDIF in, coaxial RCA or TOSLINK (not yet tested)
+
+### Sweex SC016 (Raspberry Pi)
+
+Name: `sc016`. On the Pi — not yet characterised.
+
+| Ch | Signal | Jack | Colour |
+|----|--------|------|--------|
+| 1 | Front L | Output | Green (tip) |
+| 2 | Front R | Output | Green (ring) |
+| 3 | Rear L | Output | Black (tip) |
+| 4 | Rear R | Output | Black (ring) |
+| 5 | Centre | Output | Orange (tip) |
+| 6 | LFE/Sub | Output | Orange (ring) |
+| 7 | Side L | Output | Grey (tip) |
+| 8 | Side R | Output | Grey (ring) |
+| 1 | Line-in L | Input | Blue (tip) |
+| 2 | Line-in R | Input | Blue (ring) |
+| — | Headphone | Output | (separate jack, no mic) |
+
+Jacks: 4 output (green/black/orange/grey) + line-in (blue) + headphone + S/PDIF. No mic jack.
+Channel numbering above is typical for this class of device — verify with probe script before use.
 
 ## Architecture
 

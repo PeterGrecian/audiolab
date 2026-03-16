@@ -45,29 +45,44 @@ Capture source enum: `0`=Mic, `1`=Line, `2`=IEC958 (S/PDIF), `3`=Mixer
 
 ## Hardware
 
-Two CM106 USB audio codecs (C-Media ICUSBAUDIO7D).
-One on the laptop, one on a Raspberry Pi.
+### turquoise — CM106 (laptop)
 
-### Jacks and output channels
+ALSA: `ICUSBAUDIO7D: USB Audio`. Jacks: 3 output + line-in + mic + S/PDIF.
+Sample rates: 44100, 48000 Hz. Bandwidth: −3 dB at ~85 Hz and ~17 kHz.
 
-| Jack | Colour | Channels | Use |
-|------|--------|----------|-----|
-| Front out | Green | 1, 2 | Default test output |
-| Rear out | Black | 5, 6 | Alternative output |
-| Center/Sub | Orange | 3, 4 | Not functional on this unit |
-| Line in | Blue | 1, 2 (input) | Measurement input |
-| Mic in | Pink | mono | High-gain input (not used for measurement) |
+| Ch | Signal | Jack | Colour |
+|----|--------|------|--------|
+| 1 | Front L | Output | Green (tip) |
+| 2 | Front R | Output | Green (ring) |
+| 3 | Centre | Output | Orange (tip) |
+| 4 | LFE/Sub | Output | Orange (ring) |
+| 5 | Rear L | Output | Black (tip) |
+| 6 | Rear R | Output | Black (ring) |
+| 1 | Line-in L | Input | Blue (tip) |
+| 2 | Line-in R | Input | Blue (ring) |
+| — | Mic | Input | Pink (mono) |
 
-**Supported sample rates:** 44100 Hz and 48000 Hz only.
-**Measured bandwidth:** −3 dB at ~85 Hz (low) and ~17 kHz (high).
+Known: line-in R reads 0.5–2.4 dB low vs L (frequency-dependent, confirmed not cable).
 
-### Known input asymmetry
+### Sweex SC016 (Raspberry Pi)
 
-The CM106 line-in right channel reads 0.5–2.4 dB lower than left,
-frequency-dependent (verified across cables and output jacks — it is the input).
-Apply the calibration curve from balance CSV data before comparing L/R measurements.
+Jacks: 4 output + line-in + headphone + S/PDIF. No mic.
+Channel numbering to be verified with probe script — typical layout below.
 
-### S/PDIF loopback (not yet tested)
+| Ch | Signal | Jack | Colour |
+|----|--------|------|--------|
+| 1 | Front L | Output | Green (tip) |
+| 2 | Front R | Output | Green (ring) |
+| 3 | Rear L | Output | Black (tip) |
+| 4 | Rear R | Output | Black (ring) |
+| 5 | Centre | Output | Orange (tip) |
+| 6 | LFE/Sub | Output | Orange (ring) |
+| 7 | Side L | Output | Grey (tip) |
+| 8 | Side R | Output | Grey (ring) |
+| 1 | Line-in L | Input | Blue (tip) |
+| 2 | Line-in R | Input | Blue (ring) |
+
+### S/PDIF loopback (not yet tested, both devices)
 
 Connect S/PDIF out → in with coaxial RCA or TOSLINK. Switch capture source:
 
