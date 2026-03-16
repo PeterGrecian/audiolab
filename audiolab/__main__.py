@@ -87,8 +87,10 @@ def cmd_response(args):
     Y = np.fft.rfft(recorded[:, 0] * window)
     freqs = np.fft.rfftfreq(n, d=1.0 / sr)
 
-    with np.errstate(divide='ignore', invalid='ignore'):
-        H = np.abs(Y) / np.maximum(np.abs(X), 1e-10)
+    X_mag = np.abs(X)
+    # Mask bins where sweep had less than 1% of median energy (avoids endpoint blow-up)
+    valid = X_mag >= np.median(X_mag) * 0.01
+    H = np.where(valid, np.abs(Y) / np.maximum(X_mag, 1e-10), np.nan)
 
     # Bin into log-spaced bands
     bands = np.logspace(np.log10(max(f_start, 20)), np.log10(f_end), 60)
@@ -96,7 +98,12 @@ def cmd_response(args):
     for i in range(len(bands) - 1):
         mask = (freqs >= bands[i]) & (freqs < bands[i + 1])
         if np.any(mask):
-            band_db.append((np.sqrt(bands[i] * bands[i + 1]), 20 * np.log10(np.mean(H[mask]) + 1e-10)))
+            vals = H[mask]
+            vals = vals[~np.isnan(vals)]
+            if len(vals):
+                band_db.append((np.sqrt(bands[i] * bands[i + 1]), 20 * np.log10(np.mean(vals) + 1e-10)))
+            else:
+                band_db.append((np.sqrt(bands[i] * bands[i + 1]), None))
         else:
             band_db.append((np.sqrt(bands[i] * bands[i + 1]), None))
 
