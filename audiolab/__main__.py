@@ -138,6 +138,68 @@ def cmd_response(args):
     print(f"\n         {db_min:+d}dB{' ' * (zero_pos - 6)}0dB{' ' * (bar_width - zero_pos - 3)}{db_max:+d}dB")
 
 
+def cmd_rolloff(args):
+    """Measure rolloff order at the low end using stepped sine tones."""
+    import numpy as np
+    import sounddevice as sd
+    from audiolab.devices import find_cm106
+    from audiolab.generator import sine
+    from audiolab.capture import stats
+
+    in_id, out_id = find_cm106()
+    sr = 48000
+    duration = args.duration
+
+    freqs = [10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100, 120, 150, 200, 300, 500, 1000]
+
+    def measure(f):
+        sig = sine(freq=f, duration=duration, amplitude=0.5, samplerate=sr)
+        rec = sd.playrec(sig.reshape(-1, 1), samplerate=sr,
+                         input_mapping=[1], output_mapping=[1],
+                         device=(in_id, out_id), dtype='float32')
+        sd.wait()
+        trim = int(0.1 * len(rec))
+        return stats(rec[trim:-trim])['dBFS_rms']
+
+    print("Measuring 1kHz reference ...")
+    ref_db = measure(1000)
+
+    print(f"Stepped sine tones, {duration}s each — measuring RMS level\n")
+    print(f"{'Freq':>6}  {'dBFS':>7}  {'vs 1kHz':>8}  {'slope/oct':>10}  {'order':>6}")
+    print(f"{'':->6}--{'':->7}--{'':->8}--{'':->10}--{'':->6}")
+
+    prev_f, prev_db = None, None
+    results = []
+
+    for f in freqs:
+        db = measure(f)
+        results.append((f, db))
+        rel = db - ref_db
+
+        if prev_f is not None:
+            octaves = np.log2(f / prev_f)
+            slope = (db - prev_db) / octaves
+            slope_str = f"{slope:+.1f} dB/oct"
+            order_str = f"~{abs(slope)/6:.1f}"
+        else:
+            slope_str = order_str = ""
+
+        marker = " <-- -3dB" if abs(rel + 3) < 1.0 else ""
+        print(f"{f:>6}  {db:>7.1f}  {rel:>+8.1f}  {slope_str:>10}  {order_str:>6}{marker}")
+        prev_f, prev_db = f, db
+
+    # Fit a line to the log-log rolloff region (below 200 Hz)
+    rolloff = [(f, db) for f, db in results if f <= 200]
+    if len(rolloff) >= 3 and ref_db is not None:
+        log_f = np.log2([f for f, _ in rolloff])
+        rel_db = [db - ref_db for _, db in rolloff]
+        coeffs = np.polyfit(log_f, rel_db, 1)
+        slope_fit = coeffs[0]
+        order_fit = abs(slope_fit) / 6.0
+        print(f"\nBest-fit slope (≤200 Hz): {slope_fit:+.1f} dB/octave → order ≈ {order_fit:.2f}")
+        print(f"  1st order = 6 dB/oct, 2nd order = 12 dB/oct")
+
+
 def cmd_monitor(args):
     """Curses live oscilloscope + FFT."""
     from audiolab.curses_ui import run
@@ -159,6 +221,9 @@ def main():
     p_resp.add_argument("--end", type=float, default=20000, help="End frequency Hz (default 20000)")
     p_resp.add_argument("--duration", type=float, default=5.0, help="Sweep duration seconds (default 5)")
 
+    p_roll = sub.add_parser("rolloff", help="Measure low-end rolloff order via stepped sines")
+    p_roll.add_argument("--duration", type=float, default=2.0, help="Duration per tone seconds (default 2)")
+
     sub.add_parser("monitor", help="Live curses oscilloscope + FFT")
 
     args = parser.parse_args()
@@ -169,6 +234,8 @@ def main():
         cmd_test(args)
     elif args.command == "response":
         cmd_response(args)
+    elif args.command == "rolloff":
+        cmd_rolloff(args)
     elif args.command == "monitor":
         cmd_monitor(args)
     else:
