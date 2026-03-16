@@ -24,10 +24,12 @@ def stats(data):
     rms = float(np.sqrt(np.mean(mono ** 2)))
     db_peak = 20 * np.log10(peak) if peak > 0 else -np.inf
     db_rms = 20 * np.log10(rms) if rms > 0 else -np.inf
+    crest = peak / rms if rms > 0 else 0
     return {
         "samples": len(mono),
         "peak": peak,
         "rms": rms,
         "dBFS_peak": db_peak,
         "dBFS_rms": db_rms,
+        "crest_factor": crest,   # sine = 1.414, square = 1.0, noise ~4
     }

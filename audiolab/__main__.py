@@ -45,6 +45,7 @@ def cmd_test(args):
     print(f"  Samples : {s['samples']}")
     print(f"  Peak    : {s['peak']:.4f}  ({s['dBFS_peak']:.1f} dBFS)")
     print(f"  RMS     : {s['rms']:.4f}  ({s['dBFS_rms']:.1f} dBFS)")
+    print(f"  Crest   : {s['crest_factor']:.3f}  (sine=1.414, square=1.0)")
 
     freqs, db = fft(recorded, samplerate=sr)
     pf, pdb = peak_frequency(freqs, db)

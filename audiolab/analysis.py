@@ -16,7 +16,13 @@ def fft(data, samplerate=48000):
     return freqs, db
 
 
-def peak_frequency(freqs, db):
-    """Return the frequency of the strongest spectral peak."""
-    idx = np.argmax(db)
+def peak_frequency(freqs, db, min_freq=20.0):
+    """Return the frequency of the strongest spectral peak above min_freq (skips DC)."""
+    mask = freqs >= min_freq
+    if not np.any(mask):
+        idx = np.argmax(db)
+    else:
+        sub = db.copy()
+        sub[~mask] = -np.inf
+        idx = np.argmax(sub)
     return freqs[idx], db[idx]
