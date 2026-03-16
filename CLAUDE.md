@@ -119,13 +119,45 @@ device works because the chip recovers its own transmitted clock. This gives a
 purely digital round-trip — eliminates ADC/DAC noise, ideal for clean measurements.
 Not yet tested (cable needed).
 
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `devices` | List audio devices, highlight CM106/SC016 |
+| `test` | 1kHz loopback tone, print level/FFT stats |
+| `response` | Frequency response via log sweep (electrical loopback) |
+| `rolloff` | Low-end rolloff order via stepped sines |
+| `balance` | Stereo channel balance + crosstalk, CSV output (~10 min) |
+| `monitor` | Live curses oscilloscope + FFT |
+| `impedance` | Z(f) via sense resistor and two-channel line-in |
+| `calibrate` | Derive L/R input correction from balance CSV |
+
+## Impedance measurement
+
+Circuit: sense resistor on GND side of DUT, both line-in channels single-ended vs GND:
+
+```
+Amp ─── DUT ─── [R_sense] ─── GND
+            │              │
+       line-in L       line-in R
+       (V_ref)         (V_sense = I × R_sense)
+
+Z(f) = R_sense × (V_ref / V_sense − 1)
+```
+
+CM106 output → amp input (low signal). External amp drives DUT + R_sense.
+For 8 Ω DUT with 10 Ω sense: V_sense/V_ref ≈ 10/18 = 0.56 — good sensitivity.
+
+Amp calibration (optional but recommended for absolute accuracy):
+1. Connect: CM106 out → amp → R_load (10Ω power resistor) → GND
+2. Run `impedance` with known R_load to store H_amp(f) = amp transfer function
+3. Once calibrated, both line-in channels are free for dual-speaker measurement
+
 ## Planned analyses
 
-- Oscilloscope (time domain)
-- FFT (frequency spectrum)
-- Spectrogram
-- Frequency response (sine sweep)
-- Impedance (requires hardware discussion)
+- `measure` — acoustic SPL sweep with microphone (plays through amp/speaker)
+- S/PDIF loopback characterisation
+- Sweex SC016 characterisation on Raspberry Pi
 
 ## Dev setup
 

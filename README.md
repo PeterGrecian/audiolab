@@ -18,6 +18,9 @@ python -m audiolab balance                        # stereo channel balance + cro
 python -m audiolab balance --name myamp           # tag CSV with device name
 python -m audiolab balance --out-channels 5 6     # use rear output (black jack)
 python -m audiolab monitor                        # live curses oscilloscope + FFT
+python -m audiolab impedance                      # Z(f) measurement (needs external amp + sense resistor)
+python -m audiolab impedance --r-sense 10 --end 2000 --duration 30
+python -m audiolab calibrate balance_turquoise_20260316_132606.csv   # L/R correction curve
 ```
 
 ## Installation
@@ -95,6 +98,33 @@ Expected benefit: flat response to 22 kHz, bypasses analog frontend entirely.
 
 ## Measurements
 
+### `impedance` — impedance Z(f) measurement
+
+Requires external power amp and 10 Ω (1%) wirewound sense resistor. Circuit:
+
+```
+Amp ─── DUT ─── [R_sense] ─── GND
+            │              │
+       line-in L       line-in R
+       (V_ref)         (V_sense)
+
+Z(f) = R_sense × (V_ref(f) / V_sense(f) − 1)
+```
+
+CM106 output → amp input (low-level signal only). Both line-in channels record simultaneously.
+Log sweep, transfer function computed per frequency band. Output: ASCII chart + CSV with |Z| and phase.
+
+```
+timestamp, device, r_sense_ohm, frequency_hz, Z_ohm, Z_phase_deg
+```
+
+Identifies Fs (impedance peak → resonant frequency) and Re (minimum Z → voice coil DC resistance).
+
+### `calibrate` — L/R input correction
+
+Reads a `balance` CSV and computes per-frequency gain offsets to correct CM106 line-in channel asymmetry
+(L reads 0.5–2.4 dB higher than R). Output CSV: `frequency_hz, L_gain_db, R_gain_db, L_minus_R_db`.
+
 ### `balance` — channel balance and crosstalk
 
 Plays sine tones at 24 log-spaced frequencies (2:1 density below 1 kHz),
@@ -151,22 +181,7 @@ combined analog coupling capacitor and digital DC-blocking high-pass.
 
 ## Planned
 
-### Next: impedance measurement jig
-
-Hardware: 10 Ω wirewound sense resistor (1%), external amp, power resistor load.
-
-```
-Amp → [10Ω sense] ──┬── DUT ── GND
-                    │
-               line-in L (V_ref)   line-in R (V_sense)
-
-Z(f) = 10 × (V_ref / V_sense − 1)
-```
-
-Amp calibrated first (H_amp(f) stored). Then V_drive(f) is known, freeing both
-line-in channels for simultaneous dual-speaker measurement.
-
-### Acoustic measurement (mic)
+### Next: acoustic measurement (mic)
 
 Uncalibrated mic is sufficient for relative (garden vs room) measurements.
 Mic response cancels in the difference. Connects to CM106 mic-in or line-in.
@@ -186,8 +201,8 @@ See `docs/acoustic_workflow.md` for full workflow including room mode analysis.
 
 ### Further
 
-- `calibrate` command — derive L/R input correction curve from balance CSV data
-- S/PDIF loopback characterisation (Toslink cable on order)
+- `measure` command — acoustic SPL sweep (plays through amp/speaker, captures via mic)
+- S/PDIF loopback characterisation (Toslink cable now available)
 - Sweex SC016 characterisation (on Raspberry Pi)
 - Live curses monitor improvements
 - Browser UI (FastAPI + WebSocket, dark-mode iOS style)

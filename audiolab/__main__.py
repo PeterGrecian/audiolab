@@ -327,6 +327,239 @@ def cmd_balance(args):
     print(f"\nDone. {done} measurements written to {args.output}")
 
 
+def cmd_impedance(args):
+    """Measure impedance Z(f) via two-channel voltage divider method.
+
+    Circuit (sense resistor on GND side of DUT):
+        Amp ─── DUT ─── [R_sense] ─── GND
+                    │              │
+               line-in L       line-in R
+               (V_ref)         (V_sense)
+
+        Z(f) = R_sense × (V_ref(f) / V_sense(f) − 1)
+
+    The CM106 output drives the external amp input.  Both line-in channels
+    record simultaneously.  A log sweep is used for efficiency.
+    """
+    import csv
+    import datetime
+    import numpy as np
+    import sounddevice as sd
+    from audiolab.devices import find_cm106
+    from audiolab.generator import sweep
+
+    in_id, out_id = find_cm106()
+    if in_id is None or out_id is None:
+        print("CM106 not found — using system defaults")
+
+    sr = 48000
+    r_sense = args.r_sense
+    duration = args.duration
+    f_start, f_end = args.start, args.end
+    n_bands = args.bands
+    device_name = args.name
+    out_ch = args.out_channel
+
+    print(f"Impedance measurement")
+    print(f"  R_sense : {r_sense} Ω")
+    print(f"  Sweep   : {f_start}–{f_end} Hz, {duration}s")
+    print(f"  Device  : {device_name}")
+    print(f"  Out ch  : {out_ch}  (→ amp input)")
+    print(f"  In L    : V_ref  (DUT input node)")
+    print(f"  In R    : V_sense (R_sense node, I × R_sense)")
+    print()
+
+    # Build full N-channel output buffer (ALSA hw requires it)
+    sig = sweep(f_start=f_start, f_end=f_end, duration=duration,
+                amplitude=0.5, samplerate=sr)
+    n_out = sd.query_devices(out_id)['max_output_channels']
+    buf = np.zeros((len(sig), n_out), dtype=np.float32)
+    buf[:, out_ch - 1] = sig
+
+    print("Playing sweep and recording ...")
+    rec = sd.playrec(buf, samplerate=sr,
+                     input_mapping=[1, 2],
+                     device=(in_id, out_id),
+                     dtype='float32')
+    sd.wait()
+    print("Done.")
+
+    # Check for clipping
+    peak_ref = np.max(np.abs(rec[:, 0]))
+    peak_sense = np.max(np.abs(rec[:, 1]))
+    if peak_ref > 0.95:
+        print(f"WARNING: V_ref clipping ({peak_ref:.3f})! Reduce amp output level.")
+    if peak_sense > 0.95:
+        print(f"WARNING: V_sense clipping ({peak_sense:.3f})! Reduce amp output level.")
+    if peak_sense < 0.01:
+        print(f"WARNING: V_sense very low ({peak_sense:.4f}). Check connections and R_sense.")
+
+    # Transfer function H(f) = V_sense(f) / V_ref(f), complex
+    n = len(sig)
+    window = np.hanning(n)
+    Y_ref = np.fft.rfft(rec[:n, 0] * window)
+    Y_sense = np.fft.rfft(rec[:n, 1] * window)
+    freqs = np.fft.rfftfreq(n, d=1.0 / sr)
+
+    # Only use bins where V_ref has meaningful energy (avoids division by noise)
+    ref_mag = np.abs(Y_ref)
+    valid = (ref_mag >= np.median(ref_mag) * 0.01) & (freqs >= f_start) & (freqs <= f_end)
+
+    H = np.where(valid, Y_sense / np.maximum(Y_ref, 1e-10), np.nan)
+    H_mag = np.abs(H)
+
+    # Z = R_sense × (1/H − 1)   (complex, but we report |Z| and phase)
+    # Guard against H ≈ 0 (open circuit or bad connection)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        Z = np.where(
+            valid & (H_mag > 1e-6),
+            r_sense * (1.0 / H - 1.0),
+            np.nan + 0j,
+        )
+
+    Z_mag = np.abs(Z)
+    Z_phase = np.angle(Z, deg=True)
+
+    # Bin into log-spaced bands
+    bands = np.logspace(np.log10(f_start), np.log10(f_end), n_bands + 1)
+    results = []
+    for i in range(len(bands) - 1):
+        f_lo, f_hi = bands[i], bands[i + 1]
+        f_mid = np.sqrt(f_lo * f_hi)
+        mask = valid & (freqs >= f_lo) & (freqs < f_hi)
+        z_vals = Z_mag[mask]
+        ph_vals = Z_phase[mask]
+        z_vals = z_vals[~np.isnan(z_vals)]
+        ph_vals = ph_vals[~np.isnan(ph_vals)]
+        if len(z_vals):
+            results.append((f_mid, float(np.median(z_vals)), float(np.median(ph_vals))))
+
+    if not results:
+        print("No valid impedance data — check circuit and connections.")
+        return
+
+    # Find Fs (impedance peak) and Re (minimum Z)
+    z_mags = [z for _, z, _ in results]
+    fs_idx = int(np.argmax(z_mags))
+    re_idx = int(np.argmin(z_mags))
+    fs_freq = results[fs_idx][0]
+    z_peak = results[fs_idx][1]
+    re_est = results[re_idx][1]
+    print(f"  Fs (peak)  : {fs_freq:.1f} Hz  |Z| = {z_peak:.1f} Ω")
+    print(f"  Re (min)   : {re_est:.1f} Ω  @ {results[re_idx][0]:.1f} Hz")
+    print()
+
+    # ASCII chart: log-frequency axis, linear Z scale
+    bar_width = 50
+    z_min_plot = 0.0
+    z_max_plot = max(z_peak * 1.1, 20.0)
+
+    print(f"Impedance |Z| vs frequency  (0 – {z_max_plot:.0f} Ω)")
+    print(f"{'Freq':>7}  {'':50}  |Z| Ω")
+    print(f"{'':->7}--{'':->50}----")
+    for f, z, ph in results:
+        label = f"{f/1000:.2f}k" if f >= 1000 else f"{f:.1f}"
+        filled = int((z - z_min_plot) / (z_max_plot - z_min_plot) * bar_width)
+        filled = max(0, min(bar_width, filled))
+        bar = '█' * filled
+        marker = ' ← Fs' if abs(f - fs_freq) / fs_freq < 0.05 else ''
+        print(f"{label:>7}  {bar:<50}  {z:.1f}{marker}")
+
+    # Write CSV
+    if args.output is None:
+        ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        args.output = f"impedance_{device_name}_{ts}.csv"
+
+    with open(args.output, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['timestamp', 'device', 'r_sense_ohm', 'frequency_hz',
+                         'Z_ohm', 'Z_phase_deg'])
+        ts = datetime.datetime.now().isoformat(timespec='seconds')
+        for f_hz, z, ph in results:
+            writer.writerow([ts, device_name, r_sense, round(f_hz, 2),
+                             round(z, 3), round(ph, 2)])
+
+    print(f"\n{len(results)} bands written to {args.output}")
+
+
+def cmd_calibrate(args):
+    """Derive L/R input correction curve from a balance CSV dataset.
+
+    Reads a balance CSV (L_only and R_only modes) and computes per-frequency
+    correction factors to compensate for line-in channel asymmetry.
+    Output is a calibration CSV: frequency_hz, L_offset_db, R_offset_db.
+    The convention is: corrected_L_dB = measured_L_dB - L_offset_db
+    """
+    import csv
+    import numpy as np
+
+    input_file = args.input
+    output_file = args.output
+
+    # Load relevant rows: L_only and R_only modes, all amplitudes
+    rows = []
+    with open(input_file, newline='') as f:
+        for row in csv.DictReader(f):
+            if row['mode'] in ('L_only', 'R_only'):
+                rows.append(row)
+
+    if not rows:
+        print(f"No L_only/R_only rows found in {input_file}")
+        return
+
+    # Collect per-frequency measurements
+    from collections import defaultdict
+    by_freq = defaultdict(list)
+    for row in rows:
+        freq = float(row['frequency_hz'])
+        mode = row['mode']
+        L_db = float(row['L_rms_dbfs'])
+        R_db = float(row['R_rms_dbfs'])
+        amp_db = float(row['amplitude_dbfs'])
+        # Use relative level (measured - amplitude) to remove amplitude effect
+        by_freq[round(freq, 1)].append((mode, L_db - amp_db, R_db - amp_db))
+
+    freqs_sorted = sorted(by_freq.keys())
+    results = []
+    print(f"{'Freq':>7}  {'L_gain':>8}  {'R_gain':>8}  {'Asym':>8}")
+    print(f"{'':->7}--{'':->8}--{'':->8}--{'':->8}")
+
+    for freq in freqs_sorted:
+        measurements = by_freq[freq]
+        # When L_only: L channel receives signal, R should be ~silent (crosstalk)
+        # L_gain = median L level relative to amplitude (should be ~0 dB with flat response)
+        # R_gain in R_only mode = R channel response
+        l_gains = [L for mode, L, R in measurements if mode == 'L_only']
+        r_gains = [R for mode, L, R in measurements if mode == 'R_only']
+        if not l_gains or not r_gains:
+            continue
+        l_gain = np.median(l_gains)
+        r_gain = np.median(r_gains)
+        asym = l_gain - r_gain
+        results.append((freq, l_gain, r_gain, asym))
+        print(f"{freq:>7.1f}  {l_gain:>+8.2f}  {r_gain:>+8.2f}  {asym:>+8.2f}  dB")
+
+    if not results:
+        print("Could not compute calibration — check CSV format.")
+        return
+
+    # Reference: set mean of L and R to 0 dB (correction removes only the asymmetry,
+    # not the absolute level — absolute level depends on hardware gain settings)
+    mean_gain = np.mean([(l + r) / 2 for _, l, r, _ in results])
+    print(f"\nMean channel gain: {mean_gain:+.2f} dB (not corrected — only asymmetry removed)")
+    print(f"L vs R asymmetry range: {min(a for _,_,_,a in results):+.2f} to "
+          f"{max(a for _,_,_,a in results):+.2f} dB")
+
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['frequency_hz', 'L_gain_db', 'R_gain_db', 'L_minus_R_db'])
+        for freq, l, r, asym in results:
+            writer.writerow([freq, round(l, 4), round(r, 4), round(asym, 4)])
+
+    print(f"\n{len(results)} frequency points written to {output_file}")
+    print("Apply correction: corrected_L = measured_L − L_gain, corrected_R = measured_R − R_gain")
+
+
 def cmd_monitor(args):
     """Curses live oscilloscope + FFT."""
     from audiolab.curses_ui import run
@@ -360,6 +593,22 @@ def main():
 
     sub.add_parser("monitor", help="Live curses oscilloscope + FFT")
 
+    p_imp = sub.add_parser("impedance", help="Measure Z(f) via sense resistor and two line-in channels")
+    p_imp.add_argument("--r-sense", type=float, default=10.0, metavar="OHMS",
+                       help="Sense resistor value in ohms (default: 10)")
+    p_imp.add_argument("--start", type=float, default=20, help="Start frequency Hz (default 20)")
+    p_imp.add_argument("--end", type=float, default=5000, help="End frequency Hz (default 5000)")
+    p_imp.add_argument("--duration", type=float, default=30.0, help="Sweep duration seconds (default 30)")
+    p_imp.add_argument("--bands", type=int, default=60, help="Number of log-spaced output bands (default 60)")
+    p_imp.add_argument("--name", default="turquoise", help="Device name tag (default: turquoise)")
+    p_imp.add_argument("--out-channel", type=int, default=1, metavar="CH",
+                       help="Output channel number to amp (default: 1)")
+    p_imp.add_argument("--output", default=None, help="CSV output filename (default: impedance_<name>_<timestamp>.csv)")
+
+    p_cal = sub.add_parser("calibrate", help="Derive L/R input correction curve from balance CSV")
+    p_cal.add_argument("input", help="Balance CSV file (must contain L_only and R_only mode rows)")
+    p_cal.add_argument("--output", default="calibration.csv", help="Output calibration CSV (default: calibration.csv)")
+
     args = parser.parse_args()
 
     if args.command == "devices":
@@ -377,6 +626,10 @@ def main():
         cmd_balance(args)
     elif args.command == "monitor":
         cmd_monitor(args)
+    elif args.command == "impedance":
+        cmd_impedance(args)
+    elif args.command == "calibrate":
+        cmd_calibrate(args)
     else:
         parser.print_help()
 
