@@ -250,10 +250,14 @@ def cmd_balance(args):
                 trim = int(0.1 * len(sig))
 
                 for mode_name, lr in modes:
-                    stereo = np.column_stack([sig * lr[0], sig * lr[1]])
-                    rec = sd.playrec(stereo, samplerate=sr,
+                    # Always send a full n_out channel buffer — ALSA hw devices
+                    # ignore output_mapping for non-default channels otherwise
+                    n_out = sd.query_devices(out_id)['max_output_channels']
+                    buf = np.zeros((len(sig), n_out), dtype=np.float32)
+                    buf[:, out_ch[0] - 1] = sig * lr[0]
+                    buf[:, out_ch[1] - 1] = sig * lr[1]
+                    rec = sd.playrec(buf, samplerate=sr,
                                      input_mapping=[1, 2],
-                                     output_mapping=out_ch,
                                      device=(in_id, out_id),
                                      dtype='float32')
                     sd.wait()
