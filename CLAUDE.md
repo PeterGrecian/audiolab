@@ -1,6 +1,13 @@
 # audiolab
 
 Audio analysis tool using CM106 USB audio devices.
+
+## Memory
+
+Session context and working hypotheses are stored in the `super` project memory:
+`~/.claude/projects/-home-peter-super/memory/` — files tagged `audiolab_*`.
+
+If opened outside the multi-root workspace, check there manually for prior context.
 Cross-platform: works on Raspberry Pi or laptop.
 
 ## Devices
