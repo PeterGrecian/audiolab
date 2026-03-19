@@ -124,7 +124,7 @@ Capture source enum: 0=Mic, 1=Line, 2=IEC958 In, 3=Mixer
 The CM106 supports S/PDIF I/O (IEC958). Looping S/PDIF out → in on the same
 device works because the chip recovers its own transmitted clock. This gives a
 purely digital round-trip — eliminates ADC/DAC noise, ideal for clean measurements.
-Not yet tested (cable needed).
+Tested — clean 1kHz loopback, crest factor 1.430 (theoretical 1.414). Works.
 
 ## Commands
 
@@ -163,7 +163,7 @@ Amp calibration (optional but recommended for absolute accuracy):
 ## Planned analyses
 
 - `measure` — acoustic SPL sweep with microphone (plays through amp/speaker)
-- S/PDIF loopback characterisation
+- ~~S/PDIF loopback characterisation~~ — done, find a use for it
 - Sweex SC016 characterisation on Raspberry Pi
 
 ## Dev setup
