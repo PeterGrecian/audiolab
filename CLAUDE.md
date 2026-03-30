@@ -4,6 +4,11 @@ Audio analysis tool using CM106 USB audio devices.
 
 ## Memory
 
+look in my email for info about Rapid Electronics and the components I have.
+
+going to put all electronics and hifi here - it's mostly audio anyway
+or should I write a gdoc?
+
 Session context and working hypotheses are stored in the `super` project memory:
 `~/.claude/projects/-home-peter-super/memory/` — files tagged `audiolab_*`.
 
